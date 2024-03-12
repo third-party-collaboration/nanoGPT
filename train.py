@@ -78,26 +78,46 @@ exec(open('configurator.py').read()) # overrides from command line or config fil
 config = {k: globals()[k] for k in config_keys} # will be useful for logging
 # -----------------------------------------------------------------------------
 
+# Initialize DDP
+def setup_ddp():
+    global ddp, ddp_rank, ddp_local_rank, ddp_world_size, master_process
+    ddp = int(os.environ.get('RANK', -1)) != -1
+    if ddp:
+        torch.distributed.init_process_group(backend=backend)
+        ddp_rank = torch.distributed.get_rank()
+        ddp_local_rank = int(os.environ['LOCAL_RANK'])
+        ddp_world_size = torch.distributed.get_world_size()
+        torch.cuda.set_device(ddp_local_rank)
+        master_process = ddp_rank == 0
+    else:
+        master_process = True
+        ddp_rank = 0
+        ddp_local_rank = 0
+        ddp_world_size = 1
+
+setup_ddp()
+
 # various inits, derived attributes, I/O setup
-ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
-if ddp:
-    init_process_group(backend=backend)
-    ddp_rank = int(os.environ['RANK'])
-    ddp_local_rank = int(os.environ['LOCAL_RANK'])
-    ddp_world_size = int(os.environ['WORLD_SIZE'])
-    device = f'cuda:{ddp_local_rank}'
-    torch.cuda.set_device(device)
-    master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
-    seed_offset = ddp_rank # each process gets a different seed
-    # world_size number of processes will be training simultaneously, so we can scale
-    # down the desired gradient accumulation iterations per process proportionally
-    assert gradient_accumulation_steps % ddp_world_size == 0
-    gradient_accumulation_steps //= ddp_world_size
-else:
-    # if not ddp, we are running on a single gpu, and one process
-    master_process = True
-    seed_offset = 0
-    ddp_world_size = 1
+# ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
+# if ddp:
+#     init_process_group(backend=backend)
+#     ddp_rank = int(os.environ['RANK'])
+#     ddp_local_rank = int(os.environ['LOCAL_RANK'])
+#     ddp_world_size = int(os.environ['WORLD_SIZE'])
+#     device = f'cuda:{ddp_local_rank}'
+#     torch.cuda.set_device(device)
+#     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
+seed_offset = ddp_rank # each process gets a different seed
+#     # world_size number of processes will be training simultaneously, so we can scale
+#     # down the desired gradient accumulation iterations per process proportionally
+#     assert gradient_accumulation_steps % ddp_world_size == 0
+#     gradient_accumulation_steps //= ddp_world_size
+# else:
+#     # if not ddp, we are running on a single gpu, and one process
+#     master_process = True
+#     seed_offset = 0
+#     ddp_world_size = 1
+
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
 print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
@@ -210,6 +230,7 @@ if compile:
 # wrap model into DDP container
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
+model.to(device)
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
@@ -333,4 +354,4 @@ while True:
         break
 
 if ddp:
-    destroy_process_group()
+    torch.distributed.destroy_process_group()
