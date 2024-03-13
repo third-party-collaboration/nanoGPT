@@ -78,8 +78,8 @@ if load_meta:
         meta = pickle.load(f)
     # TODO want to make this more general to arbitrary encoder/decoder schemes
     stoi, itos = meta['stoi'], meta['itos']
-    encode = lambda s: [stoi[c] for c in s]
-    decode = lambda l: ''.join([itos[i] for i in l])
+    encode = lambda s: [stoi[c] for c in s ]
+    decode = lambda l: ''.join([itos[i] for i in l ])
 else:
     # ok let's assume gpt-2 encodings by default
     print("No meta.pkl found, assuming GPT-2 encodings...")
